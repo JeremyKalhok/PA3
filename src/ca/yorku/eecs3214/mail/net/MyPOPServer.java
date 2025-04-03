@@ -14,6 +14,8 @@ public class MyPOPServer extends Thread {
     private final PrintWriter socketOut;
 
     // TODO Additional properties, if needed
+    private MailMessage message;
+    private String pass;
 
     /**
      * Initializes an object responsible for a connection to an individual client.
@@ -41,9 +43,68 @@ public class MyPOPServer extends Thread {
         // Use a try-with-resources block to ensure that the socket is closed
         // when the method returns
         try (this.socket) {
-
+          Mailbox mailbox;
             // TODO Complete this method
+            while (String response = socketIn.readLine() && !response.equals("QUIT")) {
+              String[] resSplit = response.split(" ");
 
+              if (resSplit.length > 1) {
+                message = mailbox.getMailMessage(resSplit[1]);
+              }
+
+              if resSplit[0].equals("USER") {
+                String username = resSplit[1];
+                if (mailbox.getUsername(resSplit[1])) {
+                  socketOut.println("+OK name is a valid mailbox");
+                  mailbox = new Mailbox(username);
+                  response = socketIn.readLine();
+                  resSplit = response.split(" ");
+                  if (resSplit[0].equals("PASS")) {
+                    if (mailbox.getUserMap().get(user).equals(resSplit[1])) {
+                      pass = resSplit[1];
+                      socketOut.println("+OK " + username + "'s mailbox has " + mailbox.size(false) + " messages");
+                    }
+                  }
+                } else {
+                  socketOut.println("-ERR never heard of mailbox name");
+                }
+              } 
+
+              else if (resSplit[0].equals("STAT")) {
+                socketOut.println("+OK " + mailbox.size(false) + " " + mailbox.getTotalUndeletedFileSize(false));
+              } 
+
+              else if (resSplit[0].equals("LIST")) {
+                socketOut.println("+OK " + mailbox.size(false) + " messages (" + mailbox.getTotalUndeletedFileSize(false) + " octets)");
+
+                int num = 0;
+                for (MailMessage message : mailbox) {
+                  socketOut.println(num + " " + message.getFileSize())
+                }
+              }
+
+              else if (resSplit[0].equals("RETR")) {
+                socketOut.println("+OK " + message.getFileSize + " octets");
+                socketOut.println(message.file);
+                socketOut.println(".");
+              }
+
+              else if (resSplit[0].equals("DELE")) {
+                if (!message.isDeleted()) {
+                  message.tagForDeletion();
+                  socketOut.println("+OK message " + resSplit[1] + " deleted");
+                } else {
+                  socketOut.println("-ERR message " + resSplit[1] + " already deleted");
+                }
+              }
+
+              else if (resSplit[0].equals("RSET")) {
+                for (MailMessage m : mailbox.loadMessages(pass)) {
+                  m.undelete();
+                }
+                socketOut.println("+OK maildrop has " + mailbox.size(false) + " messages");
+              }
+            }
         } catch (IOException e) {
             System.err.println("Error in client's connection handling.");
             e.printStackTrace();
