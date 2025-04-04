@@ -26,6 +26,7 @@ public class MySMTPServer extends Thread {
     private ArrayList<Mailbox> recipients = new ArrayList<>();
     private String data = "";
     private String temp;
+    private MailWriter mailWriter;
     private char[] charArray;
 
     // TODO Additional properties, if needed
@@ -56,10 +57,10 @@ public class MySMTPServer extends Thread {
             socketOut.println("220 " + getHostName());
             socketResponse = socketIn.readLine();
             response = socketResponse.toUpperCase();
-	    while (!response.equals("QUIT")) {
+	        while (!response.equals("QUIT")) {
                 if (response.startsWith("EHLO") || response.startsWith("HELO")) {
-		    socketOut.println("250 " + getHostName());
-		    state = "HELO";
+                    socketOut.println("250 " + getHostName());
+                    state = "HELO";
                 }
                 else if (response.startsWith("NOOP")) {
                     socketOut.println("250 OK");
@@ -70,7 +71,7 @@ public class MySMTPServer extends Thread {
                         socketOut.println("501 Syntax error, command unrecognized");
                     }
                     else {
-			userExists = Mailbox.isValidUser(vrfyUser[1]);
+			            userExists = Mailbox.isValidUser(vrfyUser[1]);
                         if (userExists) {
                             socketOut.println("250 OK");
                         } else {
@@ -79,63 +80,65 @@ public class MySMTPServer extends Thread {
                     }
                 }
                 else if (response.equals("RSET")) {
-			recipients.clear();
-			socketOut.println("250 Ok");
-			state = "HELO";
+                    recipients.clear();
+                    socketOut.println("250 Ok");
+                    state = "HELO";
                 }
                 else if (response.startsWith("EXPN") || response.startsWith("HELP")) {
                     socketOut.println("502 Command not implemented");
                 }
-		else if (response.startsWith("MAIL FROM:<") && response.charAt(response.length() - 1) == '>') {
-			if (!state.equals("HELO")) {
-				socketOut.println("503 Bad sequence of commands");
-			}
-			else {
-				socketOut.println("250 Ok");
-				sender = socketResponse.substring(response.indexOf('<') + 1, response.indexOf('>'));
-				state = "MAIL";
-			}
-		}
-		else if (response.startsWith("RCPT TO:<") && response.charAt(response.length() - 1) == '>') {
-			if (!state.equals("MAIL") && !state.equals("RCPT")) {
-				socketOut.println("503 Bad sequence of commands");
-			}
-			else {
-				rcptAddress = socketResponse.substring(response.indexOf('<') + 1, response.indexOf('>'));
-				if (Mailbox.isValidUser(rcptAddress)) {
-					socketOut.println("250 Ok");
-					recipients.add(new Mailbox(rcptAddress));
-					state = "RCPT";
-				}
-				else {
-					socketOut.println("550 No such user here");
-				}
-			}
-		}
-		else if (response.equals("DATA")) {
-	 		if (state.equals("RCPT")) {
-				socketOut.println("354 Start mail input; end with <CRLF>.<CRLF>");
-				temp = socketIn.readLine();
-				while (!temp.equals(".")) {
-					data += temp + "\n";
-					temp = socketIn.readLine();
-				}
-				socketOut.println("250 Ok");
-                		try(MailWriter mailWriter = new MailWriter(recipients)) {
-                    		charArray = data.toCharArray();
-                    		mailWriter.write(charArray, 0, data.length());
-                		}
-				state = "HELO";
-			}
-			else {
-				socketOut.println("503 Bad sequence of commands");
-			}
-		}		
-		else {
+		        else if (response.startsWith("MAIL FROM:<") && response.charAt(response.length() - 1) == '>') {
+                    if (!state.equals("HELO")) {
+                        socketOut.println("503 Bad sequence of commands");
+                    }
+                    else {
+                        socketOut.println("250 Ok");
+                        sender = socketResponse.substring(response.indexOf('<') + 1, response.indexOf('>'));
+                        state = "MAIL";
+                    }
+		        }
+		        else if (response.startsWith("RCPT TO:<") && response.charAt(response.length() - 1) == '>') {
+                    if (!state.equals("MAIL") && !state.equals("RCPT")) {
+                        socketOut.println("503 Bad sequence of commands");
+                    }
+                    else {
+                        rcptAddress = socketResponse.substring(response.indexOf('<') + 1, response.indexOf('>'));
+                        if (Mailbox.isValidUser(rcptAddress)) {
+                            socketOut.println("250 Ok");
+                            recipients.add(new Mailbox(rcptAddress));
+                            state = "RCPT";
+                        }
+                        else {
+                            socketOut.println("550 No such user here");
+                        }
+                    }
+                }
+                else if (response.equals("DATA")) {
+                    if (state.equals("RCPT")) {
+                        socketOut.println("354 Start mail input; end with <CRLF>.<CRLF>");
+                        temp = socketIn.readLine();
+                        while (!temp.equals(".")) {
+                            data += temp + "\n";
+                            temp = socketIn.readLine();
+                        }
+                        mailWriter = new MailWriter(recipients);
+                        charArray = data.toCharArray();
+                        mailWriter.write(charArray, 0, data.length());
+                        mailWriter.close();
+                        socketOut.println("250 Ok");
+                        recipients.clear();
+                        data = "";
+                        state = "HELO";
+                    }
+                    else {
+                        socketOut.println("503 Bad sequence of commands");
+                    }
+                }
+                else {
                     socketOut.println("500 Syntax error, command unrecognized");
                 }
-		socketResponse = socketIn.readLine();
-		response = socketResponse.toUpperCase();
+                socketResponse = socketIn.readLine();
+                response = socketResponse.toUpperCase();
             }
             socketOut.println("221 OK");
             Thread.currentThread().interrupt();
