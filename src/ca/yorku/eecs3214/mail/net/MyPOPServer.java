@@ -16,7 +16,7 @@ public class MyPOPServer extends Thread {
 
     // TODO Additional properties, if needed
     private Mailbox mailbox = null;
-
+    private String enteredUser = null;
     private boolean isAuthenticated = false;
 
     /**
@@ -107,22 +107,25 @@ public class MyPOPServer extends Thread {
             }
 //--------------------------------------------------------------
             else if (command.equals("USER")) {
-              String username = resSplit[1];
-              if (!Mailbox.isValidUser(username)) {
-                socketOut.println("-ERR never heard of mailbox name");
+              if (resSplit.length != 2) {
+                socketOut.println("-ERR requires 1 argument");
               } else {
-                try {
-                  mailbox = new Mailbox(username);
-                  socketOut.println("+OK " + username + " is a valid mailbox");
-                } catch (Mailbox.InvalidUserException e) {
-                  socketOut.println("-ERR sorry, no mailbox for " + username + " here");
+                String username = resSplit[1];
+                if (Mailbox.isValidUser(username)) {
+                  mailbox = new Mailbox(enteredUser);
+                  enteredUser = username;
+                  socketOut.println("+OK " + enteredUser + " is a valid mailbox");
+                } else {
+                  socketOut.println("-ERR never heard of mailbox name");
                 }
               }
             }
 //--------------------------------------------------------------
             else if (command.equals("PASS")) {
-              if (mailbox == null) {
-                socketOut.println("-ERR need valid USER command first");
+              if (enteredUser == null) {
+                socketOut.println("-ERR need valid USER command");
+              } else if (resSplit.length != 2) {
+                socketOut.println("-ERR requires 1 argument");
               } else {
                 String password = resSplit[1];
                 try {
@@ -167,7 +170,11 @@ public class MyPOPServer extends Thread {
                     if (idx < 1 || idx > mailbox.size(true)) {
                       socketOut.println("-ERR no such message, only " + mailbox.size(false) + " messages in maildrop");
                     } else {
-                      socketOut.println("+OK " + idx + " " + mailbox.getMailMessage(idx).getFileSize());
+                      if (mailbox.getMailMessage(idx).isDeleted()) {
+                        socketOut.println("-ERR no such message");
+                      } else {
+                        socketOut.println("+OK " + idx + " " + mailbox.getMailMessage(idx).getFileSize());
+                      }
                     }
                   } catch (Exception e) {
                     socketOut.println("-ERR argument needs to be a number");
@@ -191,11 +198,7 @@ public class MyPOPServer extends Thread {
                     BufferedReader br = new BufferedReader(new FileReader(file));
                     String line = br.readLine();
                     while (line != null) {
-                      if (line.startsWith(".")) {
-                        socketOut.println("." + line);
-                      } else {
-                        socketOut.println(line);
-                      }
+                      socketOut.println(line);
                       line = br.readLine();
                     }
                     br.close();
