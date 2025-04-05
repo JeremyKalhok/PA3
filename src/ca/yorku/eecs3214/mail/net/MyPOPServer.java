@@ -6,6 +6,7 @@ import ca.yorku.eecs3214.mail.mailbox.Mailbox;
 import java.io.*;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.util.*;
 
 public class MyPOPServer extends Thread {
 
@@ -46,6 +47,7 @@ public class MyPOPServer extends Thread {
         // Use a try-with-resources block to ensure that the socket is closed
         // when the method returns
         try (this.socket) {
+          socketOut.println("+OK POP3 server ready");
             // TODO Complete this method
 
           while ((response = socketIn.readLine()) != null) {
@@ -57,7 +59,7 @@ public class MyPOPServer extends Thread {
             String command = resSplit[0].toUpperCase();
 
             if (command.equals("QUIT")) {
-              if (authenticated && mailbox != null) {
+              if (isAuthenticated && mailbox != null) {
                 List<MailMessage> messagesToDelete = new ArrayList<>();
                 try {
                   Iterator<MailMessage> iter = mailbox.iterator();
@@ -125,7 +127,7 @@ public class MyPOPServer extends Thread {
                 String password = resSplit[1];
                 try {
                   mailbox.loadMessages(password);
-                  authenticated = true;
+                  isAuthenticated = true;
                   socketOut.println("+OK " + mailbox.getUsername() + "'s maildrop has " + mailbox.size(false) + " messages");
                 } catch (Mailbox.MailboxNotAuthenticatedException e) {
                   socketOut.println("-ERR invalid password");
@@ -138,7 +140,7 @@ public class MyPOPServer extends Thread {
                 socketOut.println("-ERR Not authenticated");
               } else {
                 try {
-                  socketOut.println("+OK " mailbox.size(false) + " " + mailbox.getTotalUndeletedFileSize(false));
+                  socketOut.println("+OK " + mailbox.size(false) + " " + mailbox.getTotalUndeletedFileSize(false));
                 } catch (Mailbox.MailboxNotAuthenticatedException e) {
                   socketOut.println("-ERR mailbox not authenticated");
                 }
@@ -165,7 +167,7 @@ public class MyPOPServer extends Thread {
                     if (idx < 1 || idx > mailbox.size(true)) {
                       socketOut.println("-ERR no such message, only " + mailbox.size(false) + " messages in maildrop");
                     } else {
-                      socketOut.println("+OK " + idx + " " + idx.getFileSize());
+                      socketOut.println("+OK " + idx + " " + mailbox.getMailMessage(idx).getFileSize());
                     }
                   } catch (Exception e) {
                     socketOut.println("-ERR argument needs to be a number");
@@ -234,7 +236,7 @@ public class MyPOPServer extends Thread {
 //--------------------------------------------------------------
             else if (command.equals("RSET")) {
               if (!isAuthenticated) {
-                socketOut.println("-ERR Not authenticated")
+                socketOut.println("-ERR Not authenticated");
               } else {
                 Iterator<MailMessage> iter = mailbox.iterator();
                 while (iter.hasNext()) {
