@@ -110,14 +110,8 @@ public class MyPOPServer extends Thread {
               if (resSplit.length != 2) {
                 socketOut.println("-ERR requires 1 argument");
               } else {
-                String username = resSplit[1];
-                if (Mailbox.isValidUser(username)) {
-                  mailbox = new Mailbox(enteredUser);
-                  enteredUser = username;
-                  socketOut.println("+OK " + enteredUser + " is a valid mailbox");
-                } else {
-                  socketOut.println("-ERR never heard of mailbox name");
-                }
+                enteredUser = resSplit[1];
+                socketOut.println("+OK " + enteredUser + " is a valid mailbox");
               }
             }
 //--------------------------------------------------------------
@@ -129,11 +123,14 @@ public class MyPOPServer extends Thread {
               } else {
                 String password = resSplit[1];
                 try {
+                  mailbox = new Mailbox(enteredUser);
                   mailbox.loadMessages(password);
                   isAuthenticated = true;
                   socketOut.println("+OK " + mailbox.getUsername() + "'s maildrop has " + mailbox.size(false) + " messages");
                 } catch (Mailbox.MailboxNotAuthenticatedException e) {
                   socketOut.println("-ERR invalid password");
+                } catch (Mailbox.InvalidUserException e) {
+                  socketOut.println("-ERR never heard of mailbox name");
                 }
               }
             }
