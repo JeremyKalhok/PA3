@@ -14,8 +14,9 @@ public class MyPOPServer extends Thread {
     private final PrintWriter socketOut;
 
     // TODO Additional properties, if needed
-    private MailMessage message;
-    private String pass;
+    private Mailbox mailbox = null;
+
+    private boolean isAuthenticated = false;
 
     /**
      * Initializes an object responsible for a connection to an individual client.
@@ -40,71 +41,211 @@ public class MyPOPServer extends Thread {
      */
     @Override
     public void run() {
+        String response;
+
         // Use a try-with-resources block to ensure that the socket is closed
         // when the method returns
         try (this.socket) {
-          Mailbox mailbox;
             // TODO Complete this method
-            while (String response = socketIn.readLine() && !response.equals("QUIT")) {
-              String[] resSplit = response.split(" ");
 
-              if (resSplit.length > 1) {
-                message = mailbox.getMailMessage(resSplit[1]);
-              }
+          while ((response = socketIn.readLine()) != null) {
+            if (response.trim().isEmpty()) {
+              continue;
+            }
 
-              if resSplit[0].equals("USER") {
-                String username = resSplit[1];
-                if (mailbox.getUsername(resSplit[1])) {
-                  socketOut.println("+OK name is a valid mailbox");
-                  mailbox = new Mailbox(username);
-                  response = socketIn.readLine();
-                  resSplit = response.split(" ");
-                  if (resSplit[0].equals("PASS")) {
-                    if (mailbox.getUserMap().get(user).equals(resSplit[1])) {
-                      pass = resSplit[1];
-                      socketOut.println("+OK " + username + "'s mailbox has " + mailbox.size(false) + " messages");
+            String[] resSplit = response.split("\\s+");
+            String command = resSplit[0].toUpperCase();
+
+            if (command.equals("QUIT")) {
+              if (authenticated && mailbox != null) {
+                List<MailMessage> messagesToDelete = new ArrayList<>();
+                try {
+                  Iterator<MailMessage> iter = mailbox.iterator();
+                  while (iter.hasNext()) {
+                    MailMessage m = iter.next();
+                    if (m.isDeleted()) {
+                      messagesToDelete.add(m);
                     }
                   }
+                } catch (Mailbox.MailboxNotAuthenticatedException e) {
+                }
+                boolean deleteFail = false;
+
+                for (MailMessage m : messagesToDelete) {
+                  if (!m.getFile().delete()) {
+                    deleteFail = true;
+                  }
+                }
+
+                if (deleteFail) {
+                  socketOut.println("-ERR some deleted messages not removed");
                 } else {
-                  socketOut.println("-ERR never heard of mailbox name");
+                  int messagesLeft = 0;
+                  try {
+                    Iterator<MailMessage> iter = mailbox.iterator();
+                    while (iter.hasNext()) {
+                      MailMessage m = iter.next();
+                      if (m.getFile().exists()) {
+                        messagesLeft++;
+                      }
+                    }
+                  } catch (Mailbox.MailboxNotAuthenticatedException e) {
+                  }
+
+                  if (messagesLeft == 0) {
+                    socketOut.println("+OK " + mailbox.getUsername() + " POP3 server signing off (mailbox empty)");
+                  } else {
+                    socketOut.println("+OK " + mailbox.getUsername() + " POP3 server signing off ( " + messagesLeft + " messages left)");
+                  }
                 }
-              } 
-
-              else if (resSplit[0].equals("STAT")) {
-                socketOut.println("+OK " + mailbox.size(false) + " " + mailbox.getTotalUndeletedFileSize(false));
-              } 
-
-              else if (resSplit[0].equals("LIST")) {
-                socketOut.println("+OK " + mailbox.size(false) + " messages (" + mailbox.getTotalUndeletedFileSize(false) + " octets)");
-
-                int num = 0;
-                for (MailMessage message : mailbox) {
-                  socketOut.println(num + " " + message.getFileSize())
-                }
+              } else {
+                socketOut.println("+OK Goodbye");
               }
-
-              else if (resSplit[0].equals("RETR")) {
-                socketOut.println("+OK " + message.getFileSize + " octets");
-                socketOut.println(message.file);
-                socketOut.println(".");
-              }
-
-              else if (resSplit[0].equals("DELE")) {
-                if (!message.isDeleted()) {
-                  message.tagForDeletion();
-                  socketOut.println("+OK message " + resSplit[1] + " deleted");
-                } else {
-                  socketOut.println("-ERR message " + resSplit[1] + " already deleted");
+              break;
+            }
+//--------------------------------------------------------------
+            else if (command.equals("USER")) {
+              String username = resSplit[1];
+              if (!Mailbox.isValidUser(username)) {
+                socketOut.println("-ERR never heard of mailbox name");
+              } else {
+                try {
+                  mailbox = new Mailbox(username);
+                  socketOut.println("+OK " + username + " is a valid mailbox");
+                } catch (Mailbox.InvalidUserException e) {
+                  socketOut.println("-ERR sorry, no mailbox for " + username + " here");
                 }
-              }
-
-              else if (resSplit[0].equals("RSET")) {
-                for (MailMessage m : mailbox.loadMessages(pass)) {
-                  m.undelete();
-                }
-                socketOut.println("+OK maildrop has " + mailbox.size(false) + " messages");
               }
             }
+//--------------------------------------------------------------
+            else if (command.equals("PASS")) {
+              if (mailbox == null) {
+                socketOut.println("-ERR need valid USER command first");
+              } else {
+                String password = resSplit[1];
+                try {
+                  mailbox.loadMessages(password);
+                  authenticated = true;
+                  socketOut.println("+OK " + mailbox.getUsername() + "'s maildrop has " + mailbox.size(false) + " messages");
+                } catch (Mailbox.MailboxNotAuthenticatedException e) {
+                  socketOut.println("-ERR invalid password");
+                }
+              }
+            }
+//--------------------------------------------------------------
+            else if (command.equals("STAT")) {
+              if (!isAuthenticated) {
+                socketOut.println("-ERR Not authenticated");
+              } else {
+                try {
+                  socketOut.println("+OK " mailbox.size(false) + " " + mailbox.getTotalUndeletedFileSize(false));
+                } catch (Mailbox.MailboxNotAuthenticatedException e) {
+                  socketOut.println("-ERR mailbox not authenticated");
+                }
+              }
+            }
+//--------------------------------------------------------------
+            else if (command.equals("LIST")) {
+              if (!isAuthenticated) {
+                socketOut.println("-ERR Not authenticated");
+              } else {
+                if (resSplit.length == 1) {
+                  socketOut.println("+OK " + mailbox.size(false) + " messages (" + mailbox.getTotalUndeletedFileSize(false) + " octets)");
+                  for (int i = 1; i <= mailbox.size(true); i++) {
+                    MailMessage m = mailbox.getMailMessage(i);
+                    if (!m.isDeleted()) {
+                      socketOut.println(i + " " + m.getFileSize());
+                    }
+                  }
+                  socketOut.println(".");
+                }
+                else if (resSplit.length == 2) {
+                  try {
+                    int idx = Integer.parseInt(resSplit[1]);
+                    if (idx < 1 || idx > mailbox.size(true)) {
+                      socketOut.println("-ERR no such message, only " + mailbox.size(false) + " messages in maildrop");
+                    } else {
+                      socketOut.println("+OK " + idx + " " + idx.getFileSize());
+                    }
+                  } catch (Exception e) {
+                    socketOut.println("-ERR argument needs to be a number");
+                  }
+                }
+              }
+            }
+//--------------------------------------------------------------
+            else if (command.equals("RETR")) {
+              if (!isAuthenticated) {
+                socketOut.println("-ERR Not authenticaated");
+              } else {
+                try {
+                  int idx = Integer.parseInt(resSplit[1]);
+                  MailMessage m = mailbox.getMailMessage(idx);
+                  if (m.isDeleted()) {
+                    socketOut.println("-ERR no such message");
+                  } else {
+                    File file = m.getFile();
+                    socketOut.println("+OK " + m.getFileSize() + " octets");
+                    BufferedReader br = new BufferedReader(new FileReader(file));
+                    String line = br.readLine();
+                    while (line != null) {
+                      if (line.startsWith(".")) {
+                        socketOut.println("." + line);
+                      } else {
+                        socketOut.println(line);
+                      }
+                      line = br.readLine();
+                    }
+                    br.close();
+                    socketOut.println(".");
+                  }
+                } catch (Exception e) {
+                  socketOut.println("-ERR argument must be a number");
+                }
+              }
+            }
+//--------------------------------------------------------------
+            else if (command.equals("DELE")) {
+              if (!isAuthenticated) {
+                socketOut.println("-ERR Not authenticated");
+              } else {
+                try {
+                  int idx = Integer.parseInt(resSplit[1]);
+                  MailMessage m = mailbox.getMailMessage(idx);
+                  if (m.isDeleted()) {
+                    socketOut.println("-ERR message " + idx + " already deleted");
+                  } else {
+                    m.tagForDeletion();
+                    socketOut.println("+OK message " + idx + " deleted");
+                  }
+                } catch (Exception e) {
+                  socketOut.println("-ERR argument must be a number");
+                }
+              }
+            }
+//--------------------------------------------------------------
+            else if (command.equals("NOOP")) {
+              if (!isAuthenticated) {
+                socketOut.println("-ERR Not authenticated");
+              } else {
+                socketOut.println("+OK");
+              }
+            }
+//--------------------------------------------------------------
+            else if (command.equals("RSET")) {
+              if (!isAuthenticated) {
+                socketOut.println("-ERR Not authenticated")
+              } else {
+                Iterator<MailMessage> iter = mailbox.iterator();
+                while (iter.hasNext()) {
+                  MailMessage m = iter.next();
+                  m.undelete();
+                }
+                socketOut.println("+OK maildrop has " + mailbox.size(false) + " messages (" + mailbox.getTotalUndeletedFileSize(false) + " octets)");
+              }
+            }
+
+          }
         } catch (IOException e) {
             System.err.println("Error in client's connection handling.");
             e.printStackTrace();
